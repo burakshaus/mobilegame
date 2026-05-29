@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, StyleSheet, PanResponder, Dimensions, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
+import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 
 const SIZE = 4;
 const WIN_VALUE = 2048;
@@ -106,30 +107,18 @@ function performMove(currentBoard: Board, direction: 'UP' | 'DOWN' | 'LEFT' | 'R
 }
 
 export default function Game2048Screen() {
-  const [board, setBoard] = useState<Board>(createEmptyBoard());
+  const [board, setBoard] = useState<Board>(() => {
+    let b = createEmptyBoard();
+    b = addRandomTile(b);
+    b = addRandomTile(b);
+    return b;
+  });
   const [score, setScore] = useState(0);
   const [highScore, setHighScore] = useState(0);
   const [gameOver, setGameOver] = useState(false);
   const [gameWon, setGameWon] = useState(false);
 
-  // Use refs so that PanResponder always accesses latest state
-  const boardRef = useRef(board);
-  const scoreRef = useRef(score);
-  const highScoreRef = useRef(highScore);
-  const gameOverRef = useRef(gameOver);
-  const gameWonRef = useRef(gameWon);
-
-  boardRef.current = board;
-  scoreRef.current = score;
-  highScoreRef.current = highScore;
-  gameOverRef.current = gameOver;
-  gameWonRef.current = gameWon;
-
-  useEffect(() => {
-    startNewGame();
-  }, []);
-
-  const startNewGame = () => {
+  const startNewGame = useCallback(() => {
     let newBoard = createEmptyBoard();
     newBoard = addRandomTile(newBoard);
     newBoard = addRandomTile(newBoard);
@@ -137,51 +126,59 @@ export default function Game2048Screen() {
     setScore(0);
     setGameOver(false);
     setGameWon(false);
-  };
-
-  const handleMove = useCallback((direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT') => {
-    if (gameOverRef.current || gameWonRef.current) return;
-
-    const { newBoard: movedBoard, addedScore, moved } = performMove(boardRef.current, direction);
-
-    if (moved) {
-      const finalBoard = addRandomTile(movedBoard);
-      const newScore = scoreRef.current + addedScore;
-
-      setBoard(finalBoard);
-      setScore(newScore);
-
-      if (newScore > highScoreRef.current) {
-        setHighScore(newScore);
-      }
-
-      if (checkHasWon(finalBoard)) {
-        setGameWon(true);
-      } else if (checkGameOver(finalBoard)) {
-        setGameOver(true);
-      }
-    }
   }, []);
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderRelease: (_e, gestureState) => {
-        const { dx, dy } = gestureState;
-        const absDx = Math.abs(dx);
-        const absDy = Math.abs(dy);
+  const handleMove = useCallback((direction: 'UP' | 'DOWN' | 'LEFT' | 'RIGHT') => {
+    setBoard(prevBoard => {
+      setGameOver(prevGameOver => {
+        setGameWon(prevGameWon => {
+          if (prevGameOver || prevGameWon) return prevGameWon;
 
-        if (absDx < 20 && absDy < 20) return; // ignore taps
+          const { newBoard: movedBoard, addedScore, moved } = performMove(prevBoard, direction);
 
-        if (absDx > absDy) {
-          handleMove(dx > 0 ? 'RIGHT' : 'LEFT');
-        } else {
-          handleMove(dy > 0 ? 'DOWN' : 'UP');
-        }
-      },
-    })
-  ).current;
+          if (moved) {
+            const finalBoard = addRandomTile(movedBoard);
+
+            setScore(prevScore => {
+              const newScore = prevScore + addedScore;
+              setHighScore(prevHigh => Math.max(prevHigh, newScore));
+              return newScore;
+            });
+
+            // Use setTimeout to avoid state update during render
+            setTimeout(() => {
+              setBoard(finalBoard);
+              if (checkHasWon(finalBoard)) {
+                setGameWon(true);
+              } else if (checkGameOver(finalBoard)) {
+                setGameOver(true);
+              }
+            }, 0);
+          }
+
+          return prevGameWon;
+        });
+        return prevGameOver;
+      });
+      return prevBoard;
+    });
+  }, []);
+
+  const gesture = Gesture.Pan()
+    .minDistance(10)
+    .onEnd((event) => {
+      const { translationX, translationY } = event;
+      const absDx = Math.abs(translationX);
+      const absDy = Math.abs(translationY);
+
+      if (absDx < 15 && absDy < 15) return;
+
+      if (absDx > absDy) {
+        handleMove(translationX > 0 ? 'RIGHT' : 'LEFT');
+      } else {
+        handleMove(translationY > 0 ? 'DOWN' : 'UP');
+      }
+    });
 
   const getColor = (value: number) => {
     const colors: { [key: number]: string } = {
@@ -214,7 +211,7 @@ export default function Game2048Screen() {
         </View>
       </View>
 
-      <View style={styles.boardWrapper} {...panResponder.panHandlers}>
+      <GestureDetector gesture={gesture}>
         <View style={styles.board}>
           {board.map((row, rIdx) => (
             <View key={`row-${rIdx}`} style={styles.row}>
@@ -239,7 +236,7 @@ export default function Game2048Screen() {
             </View>
           ))}
         </View>
-      </View>
+      </GestureDetector>
 
       {gameOver && <Text style={styles.statusText}>Oyun Bitti!</Text>}
       {gameWon && <Text style={styles.statusText}>Tebrikler, 2048'e Ulaştınız! 🎉</Text>}
@@ -280,9 +277,6 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 20,
     fontWeight: 'bold',
-  },
-  boardWrapper: {
-    padding: 5,
   },
   board: {
     backgroundColor: '#101018',
